@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>جرد الإدارة</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+<h1>جرد الإدارة</h1>
+
+<input type="file" id="fileInput">
+<select id="role">
+<option>سبورت</option>
+<option>اسيستنت</option>
+<option>تريل اسيستنت</option>
+<option>تريل</option>
+<option>ترستد</option>
+<option>مود</option>
+<option>سوبر مود</option>
+</select>
+
+<button onclick="processFile()">جرد</button>
+<button onclick="saveFile()">حفظ</button>
+
+<ul id="results"></ul>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>
