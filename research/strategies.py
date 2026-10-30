@@ -51,8 +51,8 @@ def finish(df, long_, short_, a, p, pip):
     h0, h1 = SESSIONS[p["session"]]
     hr = london_hour(df)
     sig[(hr < h0) | (hr >= h1)] = 0
-    spread = (df.ask_c - df.bid_c).values / pip
-    sig[spread > p.get("max_spread", 1e9)] = 0
+    spread = (df.ask_c - df.bid_c).values
+    sig[spread > p.get("max_spread", 1e9) * np.nanmedian(spread)] = 0  # x times the usual spread
     a = a.values
     sl = np.maximum(a * p["sl_atr"], p.get("min_stop_pips", 0) * pip)
     tp = sl * p["rr"]
@@ -142,7 +142,7 @@ def random_entry(df, p, pip):
 
 
 EXITS = dict(sl_atr=[1.0, 2.0, 3.0], rr=[0.5, 1.0, 1.5, 2.0], max_bars=[30, 120])
-COMMON = dict(session=["london", "ny", "london_ny", "all"], max_spread=[2.0])
+COMMON = dict(session=["london", "ny", "london_ny", "all"], max_spread=[2.0])  # max_spread: multiple of median spread
 
 GRID = {
     "ema_cross": (ema_cross, dict(fast=[5, 9, 20], slow=[21, 50, 100])),

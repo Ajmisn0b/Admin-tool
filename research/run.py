@@ -70,20 +70,21 @@ def main():
     ap.add_argument("--tf", nargs="+", default=["1min", "5min"])
     ap.add_argument("--split", default="2026-10-12", help="first out-of-sample day")
     ap.add_argument("--strategies", nargs="+", default=list(st.GRID))
-    ap.add_argument("--commission", type=float, default=0.7, help="round-trip commission in pips")
+    ap.add_argument("--commission-bp", type=float, default=0.7,
+                    help="round-trip commission in basis points of notional (0.7 = $35 per million per side)")
     ap.add_argument("--min-trades", type=int, default=40)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     a = ap.parse_args()
     os.makedirs(os.path.join(HERE, "reports"), exist_ok=True)
-    costs = engine.Costs(commission_pips=a.commission)
     split = np.datetime64(a.split)
 
     for sym in a.symbols:
         raw = engine.load(os.path.join(HERE, "data", f"{a.source}_{sym}.csv.gz"))
         pip = engine.pip_size(sym)
+        costs = engine.Costs(commission_pips=a.commission_bp * 1e-4 * raw.mid_c.median() / pip)
         spread = (raw.ask_c - raw.bid_c) / pip
         print(f"\n=== {a.source} {sym}: {len(raw)} M1 bars, median spread {spread.median():.2f} pips, "
-              f"commission {a.commission} pips RT, IS < {a.split} <= OOS")
+              f"commission {costs.commission_pips:.2f} pips RT, IS < {a.split} <= OOS")
         for tf in a.tf:
             bars = engine.resample(raw, tf)
             jobs = [j for n in a.strategies for j in jobs_for(n)] + random_jobs(30)
