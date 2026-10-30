@@ -147,6 +147,9 @@ COMMON = dict(session=["london", "ny", "london_ny", "all"], max_spread=[2.0])  #
 GRID = {
     "ema_cross": (ema_cross, dict(fast=[5, 9, 20], slow=[21, 50, 100])),
     "bb_revert": (bb_revert, dict(n=[20, 50], k=[2.0, 2.5, 3.0])),
+    # focused follow-up on the one family that survived the first pass: wider stops, more extreme bands
+    "bb_wide": (bb_revert, dict(n=[50, 100], k=[2.5, 3.0, 3.5], sl_atr=[3.0, 4.0, 5.0], rr=[1.0, 1.5, 2.0, 3.0],
+                                max_bars=[30, 60, 120])),
     "rsi_revert": (rsi_revert, dict(n=[2, 7, 14], lo=[10, 20, 30], trend=[0, 200, 600])),
     "donchian_break": (donchian_break, dict(n=[15, 30, 60, 120])),
     "burst": (zscore_fade_after_burst, dict(k=[2.0, 3.0, 4.0], mode=["follow", "fade"])),

@@ -29,7 +29,7 @@ def _fetch(url, cache, tries=8):
             if e.code == 404:
                 raw = b""
                 break
-            time.sleep(2 * 2 ** min(a, 4))
+            time.sleep(60 if e.code == 429 else 2 * 2 ** min(a, 4))  # 429: the server asks us to slow down
         except Exception:
             time.sleep(2 * 2 ** min(a, 4))
     else:
@@ -37,6 +37,7 @@ def _fetch(url, cache, tries=8):
     if cache:
         os.makedirs(os.path.dirname(cache), exist_ok=True)
         open(cache, "wb").write(raw)
+    time.sleep(1)  # stay polite to the free datafeed
     return raw
 
 
