@@ -123,6 +123,16 @@ def opening_range(df, p, pip):
     return finish(df, out_l, out_s, atr(df), pp, pip)
 
 
+def fix_fade(df, p, pip):
+    """Fade the run-up into the 16:00 London fix: enter at the fix against the last `look` minutes."""
+    loc = df.index.tz_localize("UTC").tz_convert("Europe/London")
+    step = int((df.index[1] - df.index[0]).total_seconds() // 60) or 1
+    at_fix = (loc.hour == 15) & (loc.minute == 60 - step)  # bar closing at 16:00
+    move = (df.mid_c - df.mid_c.shift(p["look"] // step)).values
+    big = np.abs(move) > p["k"] * atr(df).values * np.sqrt(p["look"] / step)
+    return finish(df, at_fix & big & (move < 0), at_fix & big & (move > 0), atr(df), dict(p, session="all"), pip)
+
+
 def random_entry(df, p, pip):
     """Control group: same exits and filters, coin-flip direction at random times."""
     rng = np.random.default_rng(p["seed"])
@@ -137,9 +147,10 @@ COMMON = dict(session=["london", "ny", "london_ny", "all"], max_spread=[2.0])
 GRID = {
     "ema_cross": (ema_cross, dict(fast=[5, 9, 20], slow=[21, 50, 100])),
     "bb_revert": (bb_revert, dict(n=[20, 50], k=[2.0, 2.5, 3.0])),
-    "rsi_revert": (rsi_revert, dict(n=[2, 7, 14], lo=[10, 20, 30], trend=[0, 200])),
+    "rsi_revert": (rsi_revert, dict(n=[2, 7, 14], lo=[10, 20, 30], trend=[0, 200, 600])),
     "donchian_break": (donchian_break, dict(n=[15, 30, 60, 120])),
     "burst": (zscore_fade_after_burst, dict(k=[2.0, 3.0, 4.0], mode=["follow", "fade"])),
+    "fix_fade": (fix_fade, dict(look=[30, 60], k=[0.0, 0.5, 1.0], session=["all"])),
     "opening_range": (opening_range, dict(open_hour=[8, 13], mins=[15, 30, 60], window=[120, 240], session=["all"])),
 }
 
