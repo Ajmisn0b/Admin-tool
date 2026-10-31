@@ -4,7 +4,7 @@
 //| One position at a time; stop = ATR multiple, target = R multiple,|
 //| optional time exit; risk-based sizing with daily limits.         |
 //+------------------------------------------------------------------+
-#property version   "0.10"
+#property version   "0.20"
 #property description "XAUUSD scalping framework: swap strategies in the inputs and compare them in the Strategy Tester."
 
 #include <Trade/Trade.mqh>
@@ -14,12 +14,17 @@
 enum ENUM_STRATEGY
   {
    STRAT_BOLLINGER_REVERT = 0, // Bollinger mean reversion
-   STRAT_EMA_CROSS        = 1  // EMA crossover
+   STRAT_EMA_CROSS        = 1, // EMA crossover
+   STRAT_RSI_REVERT       = 2  // RSI mean reversion (best in the backtest)
   };
 
 input group "Strategy"
-input ENUM_STRATEGY   InpStrategy         = STRAT_BOLLINGER_REVERT;
-input ENUM_TIMEFRAMES InpTimeframe        = PERIOD_M5;
+// Defaults are the backtest's best setup: RSI(14) 20/80 on M1, London + New York hours.
+input ENUM_STRATEGY   InpStrategy         = STRAT_RSI_REVERT;
+input ENUM_TIMEFRAMES InpTimeframe        = PERIOD_M1;
+input int             InpRsiPeriod        = 14;     // RSI period
+input double          InpRsiLow           = 20.0;   // RSI: buy below this, sell above 100 - this
+input int             InpRsiTrendEma      = 0;      // RSI: trend EMA filter period (0 = off)
 input int             InpBandsPeriod      = 50;     // Bollinger period
 input double          InpBandsDeviation   = 3.0;    // Bollinger deviations
 input int             InpFastEma          = 9;      // EMA cross: fast period
@@ -28,8 +33,8 @@ input int             InpSlowEma          = 21;     // EMA cross: slow period
 input group "Exits"
 input int             InpAtrPeriod        = 14;
 input double          InpStopAtr          = 3.0;    // stop loss = ATR x this
-input double          InpRewardRisk       = 2.0;    // take profit = stop x this
-input int             InpMaxBars          = 30;     // close after N bars (0 = off)
+input double          InpRewardRisk       = 1.5;    // take profit = stop x this
+input int             InpMaxBars          = 60;     // close after N bars (0 = off)
 
 input group "Risk"
 input double          InpRiskPercent      = 0.5;    // equity risked per trade, %
@@ -38,9 +43,10 @@ input int             InpMaxTradesPerDay  = 10;     // 0 = no limit
 input double          InpMaxDailyLossPct  = 2.0;    // stop trading for the day after this loss, %
 
 input group "Filters"
-input int             InpSessionStartHour = 0;      // server time, inclusive
-input int             InpSessionEndHour   = 24;     // server time, exclusive (start > end wraps midnight)
-input int             InpMaxSpreadPoints  = 60;
+// 10-19 server time = London 08:00-17:00 on the usual GMT+2/+3 broker clock
+input int             InpSessionStartHour = 10;     // server time, inclusive
+input int             InpSessionEndHour   = 19;     // server time, exclusive (start > end wraps midnight)
+input int             InpMaxSpreadPoints  = 0;      // 0 = off; points depend on the broker's digits
 
 input group "General"
 input ulong           InpMagic            = 26103101;
@@ -61,6 +67,9 @@ int OnInit(void)
      {
       case STRAT_EMA_CROSS:
          g_strategy = new CEmaCross(InpFastEma, InpSlowEma);
+         break;
+      case STRAT_RSI_REVERT:
+         g_strategy = new CRsiRevert(InpRsiPeriod, InpRsiLow, InpRsiTrendEma);
          break;
       default:
          g_strategy = new CBollingerRevert(InpBandsPeriod, InpBandsDeviation);
@@ -197,7 +206,7 @@ bool SpreadOk(void)
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick))
       return false;
-   return (tick.ask - tick.bid) / _Point <= InpMaxSpreadPoints;
+   return InpMaxSpreadPoints <= 0 || (tick.ask - tick.bid) / _Point <= InpMaxSpreadPoints;
   }
 
 //+------------------------------------------------------------------+

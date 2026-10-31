@@ -59,6 +59,62 @@ public:
   };
 
 //+------------------------------------------------------------------+
+//| RSI closes into oversold/overbought -> fade it. Optional trend   |
+//| filter: only buy above the trend EMA and only sell below it.     |
+//| Best result of the one-year M1 gold backtest (see backtest/).    |
+//+------------------------------------------------------------------+
+class CRsiRevert : public CStrategy
+  {
+private:
+   int               m_rsiHandle;
+   int               m_trendHandle;
+   int               m_period;
+   double            m_low;
+   int               m_trend;
+public:
+                     CRsiRevert(const int period, const double low, const int trend) : m_rsiHandle(INVALID_HANDLE), m_trendHandle(INVALID_HANDLE), m_period(period), m_low(low), m_trend(trend) {}
+                    ~CRsiRevert(void)
+     {
+      if(m_rsiHandle != INVALID_HANDLE) IndicatorRelease(m_rsiHandle);
+      if(m_trendHandle != INVALID_HANDLE) IndicatorRelease(m_trendHandle);
+     }
+
+   virtual bool      Init(const string symbol, const ENUM_TIMEFRAMES tf) override
+     {
+      CStrategy::Init(symbol, tf);
+      if(m_low <= 0.0 || m_low >= 50.0)
+         return false;
+      m_rsiHandle = iRSI(symbol, tf, m_period, PRICE_CLOSE);
+      if(m_trend > 0)
+         m_trendHandle = iMA(symbol, tf, m_trend, 0, MODE_EMA, PRICE_CLOSE);
+      return m_rsiHandle != INVALID_HANDLE && (m_trend <= 0 || m_trendHandle != INVALID_HANDLE);
+     }
+
+   virtual int       Signal(void) override
+     {
+      double rsi[];
+      if(CopyBuffer(m_rsiHandle, 0, 1, 2, rsi) != 2)
+         return SIGNAL_NONE;
+      // fire only on the bar RSI enters the zone: [0] = bar 2, [1] = bar 1
+      int signal = SIGNAL_NONE;
+      if(rsi[1] < m_low && rsi[0] >= m_low)
+         signal = SIGNAL_BUY;
+      else if(rsi[1] > 100.0 - m_low && rsi[0] <= 100.0 - m_low)
+         signal = SIGNAL_SELL;
+      if(signal == SIGNAL_NONE || m_trend <= 0)
+         return signal;
+
+      double trend[], close[];
+      if(CopyBuffer(m_trendHandle, 0, 1, 1, trend) != 1 || CopyClose(m_symbol, m_tf, 1, 1, close) != 1)
+         return SIGNAL_NONE;
+      bool up = close[0] > trend[0];
+      return (signal == SIGNAL_BUY) == up ? signal : SIGNAL_NONE;
+     }
+
+   virtual string    Name(void) override { return StringFormat("RsiRevert(%d, %.0f, %d)", m_period, m_low, m_trend); }
+  };
+
+//+------------------------------------------------------------------+
 //| Fast EMA crosses slow EMA -> trade in the cross direction.       |
 //+------------------------------------------------------------------+
 class CEmaCross : public CStrategy
