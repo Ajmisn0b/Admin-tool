@@ -185,6 +185,11 @@ def main():
     trades.to_csv(path, index=False, float_format="%.4f")
     write_summary(trades, prices)
     text = changes(old, pd.read_csv(path))
+    if os.environ.get("TELEGRAM_TEST") == "true":  # manual run with the test box ticked
+        closed = trades[trades.status == "closed"]
+        text = (f"✅ بوت تنبيهات الذهب متصل.\nالأسعار لين {prices.index[-1]:%Y-%m-%d %H:%M} UTC، "
+                f"سعر الذهب {prices.bid_c.iloc[-1]:.2f}.\nاختبار المراقبة من {START}: "
+                f"{len(closed)} صفقة مقفلة، {closed.R.sum():+.1f}R.\n" + text).strip()
     print(text or "no changes")
     telegram(text)
 
