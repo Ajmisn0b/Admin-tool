@@ -133,6 +133,39 @@ def fix_fade(df, p, pip):
     return finish(df, at_fix & big & (move < 0), at_fix & big & (move > 0), atr(df), dict(p, session="all"), pip)
 
 
+def ny_open(df, p, pip):
+    """Range of the first `mins` minutes after 09:30 New York; break it (follow) or fade the break."""
+    loc = df.index.tz_localize("UTC").tz_convert("America/New_York")
+    day, mins = loc.date, loc.hour * 60 + loc.minute
+    start = 9 * 60 + 30
+    in_rng = (mins >= start) & (mins < start + p["mins"])
+    after = (mins >= start + p["mins"]) & (mins < start + p["mins"] + p["window"])
+    g = pd.DataFrame({"h": df.mid_h.where(in_rng), "l": df.mid_l.where(in_rng), "d": day}, index=df.index)
+    rh = g.groupby("d").h.transform("max").values
+    rl = g.groupby("d").l.transform("min").values
+    c = df.mid_c.values
+    up, dn = edge(after & (c > rh)), edge(after & (c < rl))
+    seen, out_up, out_dn = set(), np.zeros(len(c), bool), np.zeros(len(c), bool)
+    for i in np.flatnonzero(up | dn):  # first break of the day only
+        if day[i] not in seen:
+            seen.add(day[i])
+            (out_up if up[i] else out_dn)[i] = True
+    if p["mode"] == "fade":
+        out_up, out_dn = out_dn, out_up
+    return finish(df, out_up, out_dn, atr(df), dict(p, session="all"), pip)
+
+
+def big_move(df, p, pip):
+    """Price moved more than k x (ATR scaled to the lookback) over the last `look` bars -> follow or fade."""
+    a = atr(df)
+    move = df.mid_c - df.mid_c.shift(p["look"])
+    big = move.abs() > p["k"] * a * np.sqrt(p["look"])
+    up, dn = edge(big & (move > 0)), edge(big & (move < 0))
+    if p["mode"] == "fade":
+        up, dn = dn, up
+    return finish(df, up, dn, a, p, pip)
+
+
 def random_entry(df, p, pip):
     """Control group: same exits and filters, coin-flip direction at random times."""
     rng = np.random.default_rng(p["seed"])
@@ -157,6 +190,8 @@ GRID = {
     "donchian_break": (donchian_break, dict(n=[15, 30, 60, 120])),
     "burst": (zscore_fade_after_burst, dict(k=[2.0, 3.0, 4.0], mode=["follow", "fade"])),
     "fix_fade": (fix_fade, dict(look=[30, 60], k=[0.0, 0.5, 1.0], session=["all"])),
+    "ny_open": (ny_open, dict(mins=[5, 15, 30], window=[60, 180], mode=["follow", "fade"], session=["all"])),
+    "big_move": (big_move, dict(look=[6, 12, 24], k=[1.5, 2.0, 3.0], mode=["follow", "fade"])),
     "opening_range": (opening_range, dict(open_hour=[8, 13], mins=[15, 30, 60], window=[120, 240], session=["all"])),
 }
 
