@@ -33,7 +33,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TEST: ${{ inputs.test_telegram }}
         run: python forward/run_forward.py
+        timeout-minutes: 45
       - name: Save results
+        if: always()   # keep the days already downloaded even if the run failed or timed out
         run: |
           git config user.name "forward-test"
           git config user.email "forward-test@users.noreply.github.com"

@@ -64,8 +64,8 @@ def load_prices():
     while d <= yesterday:
         path = os.path.join(DATA, f"{SYMBOL}_{d}.csv.gz")
         if not os.path.exists(path):
+            print("downloading", d, flush=True)
             day_frame(d, cache).to_csv(path, float_format="%.8g")
-            print("downloaded", d, flush=True)
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         if len(df):
             frames.append(df)
@@ -178,6 +178,8 @@ def changes(old, new):
 
 
 def main():
+    if os.environ.get("TELEGRAM_TEST") == "true":  # before the download, so it arrives even if that is slow
+        telegram("✅ بوت تنبيهات الذهب متصل. أحمّل الأسعار الحين، وتجيك النتيجة في رسالة ثانية.")
     prices = load_prices()
     trades = simulate(prices)
     path = os.path.join(HERE, "trades.csv")
@@ -187,7 +189,7 @@ def main():
     text = changes(old, pd.read_csv(path))
     if os.environ.get("TELEGRAM_TEST") == "true":  # manual run with the test box ticked
         closed = trades[trades.status == "closed"]
-        text = (f"✅ بوت تنبيهات الذهب متصل.\nالأسعار لين {prices.index[-1]:%Y-%m-%d %H:%M} UTC، "
+        text = (f"📊 الأسعار لين {prices.index[-1]:%Y-%m-%d %H:%M} UTC، "
                 f"سعر الذهب {prices.bid_c.iloc[-1]:.2f}.\nاختبار المراقبة من {START}: "
                 f"{len(closed)} صفقة مقفلة، {closed.R.sum():+.1f}R.\n" + text).strip()
     print(text or "no changes")
