@@ -166,6 +166,84 @@ def big_move(df, p, pip):
     return finish(df, up, dn, a, p, pip)
 
 
+def _london(df):
+    loc = df.index.tz_localize("UTC").tz_convert("Europe/London")
+    return loc, loc.hour * 60 + loc.minute
+
+
+def time_drift(df, p, pip):
+    """Enter at a fixed London hour in a fixed direction; the time exit (max_bars) does the rest."""
+    loc, mins = _london(df)
+    step = int((df.index[1] - df.index[0]).total_seconds() // 60) or 1
+    at = mins == (p["hour"] * 60 - step) % 1440  # bar that closes on the hour
+    up = at if p["side"] > 0 else np.zeros(len(df), bool)
+    dn = at if p["side"] < 0 else np.zeros(len(df), bool)
+    return finish(df, up, dn, atr(df), dict(p, session="all"), pip)
+
+
+def asian_sweep(df, p, pip):
+    """Asian range 00:00-07:00 London. In the London window, a bar pokes beyond it and closes back
+    inside -> fade (trade back into the range) or follow (trade the break)."""
+    loc, mins = _london(df)
+    day = loc.date
+    in_rng = mins < 7 * 60
+    win = (mins >= 7 * 60) & (mins < p["until"] * 60)
+    g = pd.DataFrame({"h": df.mid_h.where(in_rng), "l": df.mid_l.where(in_rng), "d": day}, index=df.index)
+    ah = g.groupby("d").h.transform("max").values
+    al = g.groupby("d").l.transform("min").values
+    h, l, c = df.mid_h.values, df.mid_l.values, df.mid_c.values
+    swept_hi = win & (h > ah) & (c < ah)
+    swept_lo = win & (l < al) & (c > al)
+    up, dn = swept_lo, swept_hi            # fade: back into the range
+    if p["mode"] == "follow":
+        up, dn = win & (c > ah), win & (c < al)
+    seen, ou, od = set(), np.zeros(len(c), bool), np.zeros(len(c), bool)
+    for i in np.flatnonzero(edge(up) | edge(dn)):
+        if day[i] not in seen:
+            seen.add(day[i])
+            (ou if up[i] else od)[i] = True
+    return finish(df, ou, od, atr(df), dict(p, session="all"), pip)
+
+
+def prev_day(df, p, pip):
+    """Close crosses yesterday's high/low -> follow the break or fade it."""
+    loc, _ = _london(df)
+    d = pd.Series(loc.date, index=df.index)
+    daily = pd.DataFrame({"h": df.mid_h, "l": df.mid_l, "d": d.values}).groupby("d").agg(h=("h", "max"), l=("l", "min"))
+    prev = daily.shift(1)
+    ph = d.map(prev.h).values
+    pl = d.map(prev.l).values
+    c = df.mid_c
+    up, dn = edge(c > ph), edge(c < pl)
+    if p["mode"] == "fade":
+        up, dn = dn, up
+    return finish(df, up, dn, atr(df), p, pip)
+
+
+def squeeze(df, p, pip):
+    """Bollinger bandwidth at its lowest of the last `look` bars, then a close outside the bands -> follow."""
+    m = df.mid_c.rolling(20).mean()
+    sd = df.mid_c.rolling(20).std()
+    bw = sd / m
+    tight = (bw <= bw.rolling(p["look"]).min() * p["tol"]).rolling(p["memory"]).max().astype(bool)
+    up = edge(tight & (df.mid_c > m + 2 * sd))
+    dn = edge(tight & (df.mid_c < m - 2 * sd))
+    return finish(df, up, dn, atr(df), p, pip)
+
+
+def week_gap(df, p, pip):
+    """First bar of the week opens away from Friday's close by more than k x ATR -> fade or follow."""
+    t = pd.Series(df.index, index=df.index)
+    first = (t.diff() > pd.Timedelta(hours=24)).values
+    gap = (df.mid_o - df.mid_c.shift()).values
+    a = atr(df).shift().values
+    big = first & (np.abs(gap) > p["k"] * a)
+    up, dn = big & (gap < 0), big & (gap > 0)    # fade
+    if p["mode"] == "follow":
+        up, dn = dn, up
+    return finish(df, up, dn, atr(df), dict(p, session="all"), pip)
+
+
 def random_entry(df, p, pip):
     """Control group: same exits and filters, coin-flip direction at random times."""
     rng = np.random.default_rng(p["seed"])
@@ -192,6 +270,11 @@ GRID = {
     "fix_fade": (fix_fade, dict(look=[30, 60], k=[0.0, 0.5, 1.0], session=["all"])),
     "ny_open": (ny_open, dict(mins=[5, 15, 30], window=[60, 180], mode=["follow", "fade"], session=["all"])),
     "big_move": (big_move, dict(look=[6, 12, 24], k=[1.5, 2.0, 3.0], mode=["follow", "fade"])),
+    "time_drift": (time_drift, dict(hour=[0, 1, 14, 15], side=[1, -1], session=["all"])),
+    "asian_sweep": (asian_sweep, dict(until=[10, 12], mode=["fade", "follow"], session=["all"])),
+    "prev_day": (prev_day, dict(mode=["follow", "fade"])),
+    "squeeze": (squeeze, dict(look=[100, 250], tol=[1.0, 1.2], memory=[5, 20])),
+    "week_gap": (week_gap, dict(k=[1.0, 2.0, 4.0], mode=["fade", "follow"], session=["all"])),
     "opening_range": (opening_range, dict(open_hour=[8, 13], mins=[15, 30, 60], window=[120, 240], session=["all"])),
 }
 

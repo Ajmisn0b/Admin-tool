@@ -1,7 +1,7 @@
 """Forward (paper) test of the gold portfolio on live prices, no real orders.
 
 Every run downloads the finished days of Dukascopy XAUUSD M1 prices since the warm-up date,
-re-simulates the three frozen strategies from the backtest, and writes:
+re-simulates the frozen strategies from the backtest, and writes:
   forward/trades.csv   every signal with its entry, stop, target and result
   forward/README.md    the running summary (Arabic)
 If TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are set, it also sends what changed since the last run.
@@ -41,6 +41,9 @@ STRATEGIES = [
      dict(session="ny", n=50, k=3.0), 3.0, 3.0, 120, 0.02035),
     ("rsi5", "RSI مع الاتجاه", "5min", st.rsi_revert,
      dict(session="all", n=14, lo=30, trend=200), 2.0, 1.5, 120, 0.07992),
+    # added 2026-10-31 after the second round of tests: 120-hour breakout, London + NY hours
+    ("donchian", "اختراق دونشيان", "1h", st.donchian_break,
+     dict(session="london_ny", n=120), 3.0, 2.0, 30, None),
 ]
 
 
@@ -136,7 +139,7 @@ def write_summary(t, prices):
                      else f"| {label} | 0 | - | - | - | {len(o)} |")
     lines += [
         "",
-        "**المتوقع من الاختبار التاريخي:** حوالي +0.1R لكل صفقة، وحوالي 19 صفقة بالشهر في سوق مثل 2026. "
+        "**المتوقع من الاختبار التاريخي:** حوالي +0.1R لكل صفقة، وحوالي 20 صفقة بالشهر في سوق مثل 2026 (دونشيان منها حوالي 4). "
         "أقل من شهر نتائجه عشوائية، فلا تحكم قبل 3 أشهر تقريباً.",
         "",
         "## آخر الصفقات",
