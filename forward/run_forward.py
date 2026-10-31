@@ -45,12 +45,10 @@ STRATEGIES = [
 
 
 def day_frame(day, cache):
-    sides = {}
-    for side in ("BID", "ASK"):
-        rows = dukascopy.day_candles(SYMBOL, day, side, cache)
-        sides[side] = pd.DataFrame(rows, columns=["time", "o", "h", "l", "c", "v"]).set_index("time")
-    b, a = sides["BID"], sides["ASK"]
-    df = b[["o", "h", "l", "c"]].add_prefix("bid_").join(a[["o", "h", "l", "c"]].add_prefix("duka_ask_"), how="inner")
+    # bid side only: the ask is modelled with Exness-like costs, and one file per day halves the requests
+    rows = dukascopy.day_candles(SYMBOL, day, "BID", cache)
+    b = pd.DataFrame(rows, columns=["time", "o", "h", "l", "c", "v"]).set_index("time")
+    df = b[["o", "h", "l", "c"]].add_prefix("bid_")
     df["volume"] = b["v"]
     return df
 
@@ -65,7 +63,11 @@ def load_prices():
         path = os.path.join(DATA, f"{SYMBOL}_{d}.csv.gz")
         if not os.path.exists(path):
             print("downloading", d, flush=True)
-            day_frame(d, cache).to_csv(path, float_format="%.8g")
+            try:
+                day_frame(d, cache).to_csv(path, float_format="%.8g")
+            except RuntimeError as e:  # Dukascopy throttling: use what we have, the next run catches up
+                print("stopped:", e, flush=True)
+                break
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         if len(df):
             frames.append(df)
