@@ -1,0 +1,48 @@
+//@version=6
+// GoldScalper RSI: the best setup from the one-year XAUUSD backtest (see backtest/README.md).
+// Buy when RSI closes below the low level, sell when it closes above 100 - low,
+// London + New York hours only, stop = ATR x, target = stop x, time exit after N bars.
+// TradingView fills at one price, so the spread is charged through the commission
+// (cash per contract, both sides): 0.22 per side ~ 0.30 spread + commission on an ECN account.
+strategy("GoldScalper RSI", overlay = true, initial_capital = 10000, currency = currency.USD,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.22,
+     pyramiding = 0, calc_on_every_tick = false, process_orders_on_close = false)
+
+rsiLen   = input.int(14, "RSI period", minval = 2)
+rsiLow   = input.float(20, "RSI low (sell level = 100 - low)", minval = 1, maxval = 49)
+trendLen = input.int(0, "Trend EMA filter (0 = off)", minval = 0)
+atrLen   = input.int(14, "ATR period", minval = 1)
+stopAtr  = input.float(3.0, "Stop = ATR x", minval = 0.1)
+rr       = input.float(1.5, "Target = stop x", minval = 0.1)
+maxBars  = input.int(60, "Close after N bars (0 = off)", minval = 0)
+riskPct  = input.float(0.5, "Risk per trade %", minval = 0.01)
+sess     = input.session("0800-1700", "Trading hours (London time)")
+
+r   = ta.rsi(close, rsiLen)
+atr = ta.sma(ta.tr(true), atrLen)  // simple average of true range, same as the backtest and MT5
+inSession = not na(time(timeframe.period, sess, "Europe/London"))
+trend = trendLen > 0 ? ta.ema(close, trendLen) : na
+
+longSig  = ta.crossunder(r, rsiLow)
+shortSig = ta.crossover(r, 100 - rsiLow)
+if trendLen > 0
+    longSig  := longSig and close > trend
+    shortSig := shortSig and close < trend
+
+stopDist = atr * stopAtr
+qty = stopDist > 0 ? strategy.equity * riskPct / 100 / stopDist : 0
+
+if strategy.position_size == 0 and inSession and qty > 0
+    if longSig
+        strategy.entry("Long", strategy.long, qty = qty)
+        strategy.exit("Long exit", "Long", stop = close - stopDist, limit = close + stopDist * rr)
+    else if shortSig
+        strategy.entry("Short", strategy.short, qty = qty)
+        strategy.exit("Short exit", "Short", stop = close + stopDist, limit = close - stopDist * rr)
+
+if maxBars > 0 and strategy.opentrades > 0 and bar_index - strategy.opentrades.entry_bar_index(0) >= maxBars
+    strategy.close_all(comment = "Time exit")
+
+plot(trendLen > 0 ? trend : na, "Trend EMA", color.orange)
+plotshape(longSig and inSession, "Buy signal", shape.triangleup, location.belowbar, color.green, size = size.tiny)
+plotshape(shortSig and inSession, "Sell signal", shape.triangledown, location.abovebar, color.red, size = size.tiny)
