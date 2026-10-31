@@ -57,11 +57,12 @@ def day_frame(day, cache):
 
 
 def load_prices():
-    """Finished UTC days from WARMUP to yesterday, cached one file per day in forward/data/."""
+    """Finished UTC days from WARMUP to yesterday, cached one file per day in forward/data/.
+    Returns the prices and the last day that is complete (downloads can stop early)."""
     os.makedirs(DATA, exist_ok=True)
     yesterday = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
     frames, cache = [], tempfile.mkdtemp()
-    d = WARMUP
+    d, through = WARMUP, yesterday
     while d <= yesterday:
         path = os.path.join(DATA, f"{SYMBOL}_{d}.csv.gz")
         if not os.path.exists(path):
@@ -70,6 +71,7 @@ def load_prices():
                 day_frame(d, cache).to_csv(path, float_format="%.8g")
             except RuntimeError as e:  # Dukascopy throttling: use what we have, the next run catches up
                 print("stopped:", e, flush=True)
+                through = d - dt.timedelta(days=1)
                 break
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         if len(df):
@@ -79,7 +81,7 @@ def load_prices():
     for k in "ohlc":  # Exness-like costs: Dukascopy bid + a fixed spread, like the backtest
         df[f"ask_{k}"] = df[f"bid_{k}"] + SPREAD
         df[f"mid_{k}"] = (df[f"bid_{k}"] + df[f"ask_{k}"]) / 2
-    return df
+    return df, through
 
 
 def simulate(prices):
@@ -182,10 +184,63 @@ def changes(old, new):
     return "\n".join(msg)
 
 
+# What the 12-year backtest (2015-2026, same costs) says to expect per strategy:
+# trades per month, average R per trade. Recent high-volatility years (2025-26) ran about twice as hot.
+EXPECTED = {"momentum": (3.5, 0.064), "bollinger": (3.4, 0.163), "rsi5": (4.1, 0.077), "donchian": (4.6, 0.122)}
+EXPECTED_ALL, SD_R = 0.106, 1.21   # portfolio average R per trade and its standard deviation
+MONTHS_AR = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+
+
+def monthly_reports(trades, through):
+    """Telegram + forward/reports/YYYY-MM.md for every finished month not reported yet."""
+    folder = os.path.join(HERE, "reports")
+    os.makedirs(folder, exist_ok=True)
+    closed = trades[trades.status == "closed"].copy()
+    closed["exit_time"] = pd.to_datetime(closed.exit_time)
+    month = pd.Period(START, "M")
+    while month.end_time.date() <= through:
+        path = os.path.join(folder, f"{month}.md")
+        if not os.path.exists(path):
+            text = month_text(closed, month)
+            open(path, "w").write(text + "\n")
+            telegram(text)
+            print(text)
+        month += 1
+
+
+def month_text(closed, month):
+    m = closed[closed.exit_time.dt.to_period("M") == month]
+    upto = closed[closed.exit_time <= month.end_time]
+    lines = [f"📅 تقرير {MONTHS_AR[month.month - 1]} {month.year}", ""]
+    for key, label, *_ in STRATEGIES:
+        s = m[m.strategy == key]
+        per_month, avg = EXPECTED[key]
+        win = f"{(s.R > 0).mean():.0%}" if len(s) else "-"
+        lines.append(f"• {label}: {len(s)} صفقة، رابحة {win}، {s.R.sum():+.1f}R "
+                     f"(المتوقع تقريباً {per_month:.0f} صفقة و {per_month * avg:+.1f}R)")
+    exp_m = sum(v[0] * v[1] for v in EXPECTED.values())
+    lines += ["", f"المحفظة هالشهر: {len(m)} صفقة، {m.R.sum():+.1f}R (المتوقع تقريباً {exp_m:+.1f}R)"]
+    n = len(upto)
+    if n:
+        exp, band = n * EXPECTED_ALL, 2 * SD_R * np.sqrt(n)
+        got = upto.R.sum()
+        if got < exp - band:
+            verdict = "⚠️ أقل من الحد الأدنى المتوقع. هذا مؤشر إن الاستراتيجيات ما تشتغل مثل الاختبار."
+        elif got > exp + band:
+            verdict = "✅ أفضل من المتوقع بوضوح (ممكن يكون حظ، لا تتحمس)."
+        else:
+            verdict = "✅ ضمن المدى المتوقع."
+        lines += [f"من بداية الاختبار: {n} صفقة، {got:+.1f}R، معامل ربح {pf(upto.R):.2f}",
+                  f"المتوقع لهالعدد: {exp:+.1f}R، والمدى الطبيعي من {exp - band:+.1f} إلى {exp + band:+.1f}R",
+                  verdict]
+    lines += ["", "R = وحدة مخاطرة. بمخاطرة 0.5% لكل صفقة، 1R = نص بالمية من الحساب."]
+    return "\n".join(lines)
+
+
 def main():
     if os.environ.get("TELEGRAM_TEST") == "true":  # before the download, so it arrives even if that is slow
         telegram("✅ بوت تنبيهات الذهب متصل. أحمّل الأسعار الحين، وتجيك النتيجة في رسالة ثانية.")
-    prices = load_prices()
+    prices, through = load_prices()
     trades = simulate(prices)
     path = os.path.join(HERE, "trades.csv")
     old = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame()
@@ -199,6 +254,7 @@ def main():
                 f"{len(closed)} صفقة مقفلة، {closed.R.sum():+.1f}R.\n" + text).strip()
     print(text or "no changes")
     telegram(text)
+    monthly_reports(trades, through)
 
 
 if __name__ == "__main__":
